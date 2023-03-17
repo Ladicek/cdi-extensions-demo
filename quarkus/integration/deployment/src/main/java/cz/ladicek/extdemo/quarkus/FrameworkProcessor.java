@@ -1,5 +1,13 @@
 package cz.ladicek.extdemo.quarkus;
 
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import org.jboss.jandex.AnnotationInstance;
+import org.jboss.jandex.AnnotationTarget;
+import org.jboss.jandex.DotName;
+import org.jboss.jandex.MethodInfo;
+
 import cz.ladicek.extdemo.framework.Importance;
 import cz.ladicek.extdemo.framework.Important;
 import cz.ladicek.extdemo.framework.Logged;
@@ -20,10 +28,6 @@ import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
 import jakarta.enterprise.inject.spi.DeploymentException;
-import org.jboss.jandex.AnnotationInstance;
-import org.jboss.jandex.AnnotationTarget;
-import org.jboss.jandex.DotName;
-import org.jboss.jandex.MethodInfo;
 
 public class FrameworkProcessor {
     @BuildStep
@@ -33,9 +37,7 @@ public class FrameworkProcessor {
 
     @BuildStep
     AdditionalBeanBuildItem discoverFrameworkClasses() {
-        return AdditionalBeanBuildItem.builder()
-                .addBeanClasses(LoggingInterceptor.class, ProcessorManager.class)
-                .build();
+        return new AdditionalBeanBuildItem(LoggingInterceptor.class, ProcessorManager.class);
     }
 
     @BuildStep
@@ -62,17 +64,16 @@ public class FrameworkProcessor {
     @Record(ExecutionTime.STATIC_INIT)
     SyntheticBeanBuildItem registerImportanceImpl(BeanDiscoveryFinishedBuildItem beanDiscovery,
             TransformedAnnotationsBuildItem transformedAnnotations, FrameworkRecorder recorder) {
-        String[] importantProcessors = beanDiscovery.beanStream()
+        DotName importantName = DotName.createSimple(Important.class);
+        Set<String> importantProcessors = beanDiscovery.beanStream()
                 .classBeans()
                 .withBeanType(Processor.class)
-                .stream()
-                .filter(it -> transformedAnnotations.getAnnotation(it.getImplClazz(), DotName.createSimple(Important.class)) != null)
-                .map(it -> it.getImplClazz().name().toString())
-                .toArray(String[]::new);
+                .filter(b -> transformedAnnotations.hasAnnotation(b.getImplClazz(), importantName))
+                .collect(Collectors.mapping(b -> b.getImplClazz().name().toString(), Collectors.toSet()));
 
         return SyntheticBeanBuildItem.configure(ImportanceImpl.class)
                 .types(Importance.class)
-                .runtimeValue(recorder.createImportance(importantProcessors))
+                .runtimeProxy(recorder.createImportance(importantProcessors))
                 .done();
     }
 
